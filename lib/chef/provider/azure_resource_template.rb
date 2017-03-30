@@ -39,7 +39,7 @@ class Chef
           machines = template['resources'].select { |h| h['type'] == 'Microsoft.Compute/virtualMachines' }
           machines.each do |machine|
             action_handler.report_progress "adding a Chef VM Extension with name: #{machine['name']} and location: #{machine['location']} "
-            extension = chef_vm_extension(machine['name'], machine['location'])
+            extension = chef_vm_extension(machine['name'], machine['location'], machine)
             template['resources'] << JSON.parse(extension)
           end
         end
@@ -53,40 +53,42 @@ class Chef
         parameters.reduce(:merge!)
       end
 
-      def chef_vm_extension(machine_name, location)
+      def chef_vm_extension(machine_name, location, machine)
         chef_server_url = Chef::Config[:chef_server_url]
         validation_client_name = Chef::Config[:validation_client_name]
         validation_key_content = ::File.read(Chef::Config[:validation_key])
         chef_environment = new_resource.chef_extension[:environment].empty? ? '_default' : new_resource.chef_extension[:environment]
         machine_name = "\'#{machine_name}\'" unless machine_name[0] == '['
-        <<-EOH
-          {
-            "type": "Microsoft.Compute/virtualMachines/extensions",
-            "name": "[concat(#{machine_name.delete('[]')},'/', 'chefExtension')]",
-            "apiVersion": "2015-05-01-preview",
-            "location": "#{location}",
-            "dependsOn": [
+        chef_extension_template = {
+            "type" => "Microsoft.Compute/virtualMachines/extensions",
+            "name" => "[concat(#{machine_name.delete('[]')},'/', 'chefExtension')]",
+            "apiVersion" => "2015-05-01-preview",
+            "location" => "#{location}",
+            "dependsOn" => [
               "[concat('Microsoft.Compute/virtualMachines/', #{machine_name.delete('[]')})]"
             ],
-            "properties": {
-              "publisher": "Chef.Bootstrap.WindowsAzure",
-              "type": "#{new_resource.chef_extension[:client_type]}",
-              "typeHandlerVersion": "#{new_resource.chef_extension[:version]}",
-              "settings": {
-                "bootstrap_options": {
-                  "chef_node_name" : "[concat(#{machine_name.delete('[]')},'.','#{new_resource.resource_group}')]",
-                  "chef_server_url" : "#{chef_server_url}",
-                  "validation_client_name" : "#{validation_client_name}",
-                  "environment" : "#{chef_environment}"
+            "properties" => {
+              "publisher" => "Chef.Bootstrap.WindowsAzure",
+              "type" => "#{new_resource.chef_extension[:client_type]}",
+              "typeHandlerVersion" => "#{new_resource.chef_extension[:version]}",
+              "settings" => {
+                "bootstrap_options" => {
+                  "chef_node_name" => "[concat(#{machine_name.delete('[]')},'.','#{new_resource.resource_group}')]",
+                  "chef_server_url" => "#{chef_server_url}",
+                  "validation_client_name" => "#{validation_client_name}",
+                  "environment" => "#{chef_environment}"
                 },
-                "runlist": "#{new_resource.chef_extension[:runlist]}"
+                "runlist" => "#{new_resource.chef_extension[:runlist]}"
               },
-              "protectedSettings": {
-                  "validation_key": "#{validation_key_content.gsub("\n", '\\n')}"
+              "protectedSettings" => {
+                    "validation_key" => "#{validation_key_content.gsub("\n", '\\n')}"
               }
             }
-          }
-        EOH
+        }
+        if machine.has_key?("copy")
+            chef_extension_template["copy"] = machine["copy"]
+        end
+        chef_extension_template.to_json
       end
 
       def follow_deployment_until_end_state
